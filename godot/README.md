@@ -136,6 +136,27 @@ godot/
 │       ├── codebase_scanner.gd        # Project scanning
 │       ├── file_writer.gd             # File creation
 │       ├── conversation_manager.gd     # Conversation history
+│       ├── dependency_graph.gd        # Dependency analysis
+│       ├── multi_model_handler.gd     # Multi-provider support
+│       ├── resource_generator.gd      # Resource file generation
+│       ├── code_analyzer.gd           # Code analysis & refactoring
+│       ├── visual_scripting.gd        # Visual scripting support
+│       ├── template_library.gd         # Template system
+│       ├── ai_debugger.gd             # AI-powered debugging
+│       ├── image_to_code.gd           # Image to code conversion
+│       ├── code_reviewer.gd           # Code review system
+│       ├── smart_refactorer.gd        # Smart refactoring
+│       ├── test_generator.gd          # Test generation
+│       ├── documentation_generator.gd # Documentation generation
+│       ├── performance_profiler.gd    # Performance profiling
+│       ├── multi_language_support.gd  # Multi-language support
+│       ├── plugin_system.gd           # Plugin architecture
+│       ├── version_control.gd         # Git integration
+│       ├── collaboration.gd           # Real-time collaboration
+│       ├── model_training.gd          # Model training
+│       ├── scene_analyzer.gd          # Advanced scene analysis
+│       ├── shader_generator.gd        # Shader generation
+│       ├── animation_generator.gd     # Animation generation
 │       ├── register_types.*           # Module registration
 │       ├── SCsub                       # Build script
 │       └── README.md                   # Detailed documentation
@@ -195,6 +216,108 @@ Create a complete inventory system with items, UI display, and drag-and-drop fun
 - `scenes/ui/inventory_panel.tscn` - UI scene
 - All files properly connected and ready to use
 
+### Example 3: Use Templates
+
+**GDScript:**
+```gdscript
+# Apply a template
+var result = TemplateLibrary.apply_template("2d_platformer", "res://")
+print("Created files: ", result.files_created)
+```
+
+### Example 4: Analyze Code Quality
+
+**GDScript:**
+```gdscript
+# Analyze a file
+var analysis = CodeAnalyzer.analyze_file("res://scripts/player.gd")
+print("Code quality score: ", analysis.score)
+print("Suggestions: ", analysis.suggestions)
+
+# Analyze entire project
+var project_analysis = CodeAnalyzer.analyze_project()
+print("Average code quality: ", project_analysis.average_score)
+```
+
+### Example 5: Use Dependency Graph
+
+**GDScript:**
+```gdscript
+# Build dependency graph
+DependencyGraph.build_graph("res://")
+
+# Get affected files
+var affected = DependencyGraph.get_affected_files("res://scripts/player.gd")
+
+# Visualize graph
+var visualization = DependencyGraph.get_graph_visualization()
+print(visualization)
+```
+
+### Example 6: Switch AI Providers
+
+**GDScript:**
+```gdscript
+# Use GPT-4 instead of Claude
+multi_model_handler.set_provider(MultiModelHandler.Provider.OPENAI_GPT4, api_key)
+multi_model_handler.send_request(params)
+
+# Use local Ollama model
+multi_model_handler.set_provider(MultiModelHandler.Provider.OLLAMA_LOCAL)
+multi_model_handler.send_request(params)
+```
+
+### Example 3: Use Templates
+
+**GDScript:**
+```gdscript
+# Apply a template
+var result = TemplateLibrary.apply_template("2d_platformer", "res://")
+print("Created files: ", result.files_created)
+```
+
+### Example 4: Analyze Code Quality
+
+**GDScript:**
+```gdscript
+# Analyze a file
+var analysis = CodeAnalyzer.analyze_file("res://scripts/player.gd")
+print("Code quality score: ", analysis.score)
+print("Suggestions: ", analysis.suggestions)
+
+# Analyze entire project
+var project_analysis = CodeAnalyzer.analyze_project()
+print("Average code quality: ", project_analysis.average_score)
+```
+
+### Example 5: Use Dependency Graph
+
+**GDScript:**
+```gdscript
+# Build dependency graph
+DependencyGraph.build_graph("res://")
+
+# Get affected files
+var affected = DependencyGraph.get_affected_files("res://scripts/player.gd")
+
+# Visualize graph
+var visualization = DependencyGraph.get_graph_visualization()
+print(visualization)
+```
+
+### Example 6: Switch AI Providers
+
+**GDScript:**
+```gdscript
+# Use GPT-4 instead of Claude
+multi_model_handler.set_provider(MultiModelHandler.Provider.OPENAI_GPT4, api_key)
+multi_model_handler.send_request(params)
+
+# Use local Ollama model
+multi_model_handler.set_provider(MultiModelHandler.Provider.OLLAMA_LOCAL)
+multi_model_handler.send_request(params)
+```
+
 ## 🐛 Troubleshooting
 
 ### "API handler script not found"
@@ -243,14 +366,90 @@ This project is built on Godot Engine, which is licensed under the MIT License. 
 
 ## 🗺️ Roadmap
 
-- [ ] Enhanced codebase understanding with dependency graphs
-- [ ] Scene file generation (.tscn) support improvements
-- [ ] Resource file generation (.tres) support improvements
-- [ ] Multi-model support (GPT-4, etc.)
-- [ ] Offline mode with local models
-- [ ] Code refactoring and optimization suggestions
-- [ ] Visual scripting integration
-- [ ] Template library for common game patterns
+### ✅ Completed Features
+
+- [x] Enhanced codebase understanding with dependency graphs
+- [x] Scene file generation (.tscn) support improvements
+- [x] Resource file generation (.tres) support improvements
+- [x] Multi-model support (GPT-4, GPT-3.5, Claude, Ollama)
+- [x] Offline mode with local models (Ollama integration)
+- [x] Code refactoring and optimization suggestions
+- [x] Visual scripting integration
+- [x] Template library for common game patterns
+
+### 🚀 Recently Completed Features
+
+- [x] **AI-Powered Debugging**: Automatic bug detection and fix suggestions
+- [x] **Code Generation from Images**: Convert screenshots/mockups to code
+- [x] **Interactive Code Reviews**: AI reviews code changes and suggests improvements
+- [x] **Smart Refactoring**: Automated refactoring with AI assistance
+- [x] **Test Generation**: Auto-generate unit tests for your code
+- [x] **Documentation Generator**: Auto-generate API documentation from code
+- [x] **Performance Profiling**: AI-powered performance analysis and optimization
+- [x] **Multi-language Support**: Support for C# and other Godot-supported languages
+- [x] **Plugin System**: Extensible plugin architecture for custom AI features
+- [x] **Version Control Integration**: AI-assisted git operations and commit messages
+- [x] **Real-time Collaboration**: Multi-user AI-assisted development
+- [x] **Custom Model Training**: Train models on your specific codebase patterns
+- [x] **Advanced Scene Analysis**: Deep analysis of scene structure and optimization
+- [x] **Shader Generation**: AI-powered shader code generation
+- [x] **Animation System**: AI-assisted animation and tween creation
+
+### 🔮 Future Features
+
+### 💡 Future Ideas
+
+- [ ] **Voice Commands**: Control DotAI with voice input
+- [ ] **AR/VR Support**: AI assistance for AR/VR game development
+- [ ] **Mobile Development**: Enhanced mobile game development features
+- [ ] **Export Optimization**: AI-powered export settings optimization
+- [ ] **Asset Generation**: AI-generated sprites, sounds, and other assets
+- [ ] **Game Design Assistant**: AI helps with game design and mechanics
+- [ ] **Localization Tools**: AI-powered translation and localization
+- [ ] **Accessibility Features**: AI-assisted accessibility improvements
+
+## ✨ Recently Completed Features
+
+### 🔗 Enhanced Dependency Graph Analysis
+- **Dependency Visualization**: Visualize code dependencies across your entire project
+- **Circular Dependency Detection**: Automatically detect and warn about circular dependencies
+- **Impact Analysis**: See which files are affected when you modify a file
+- **Graph Statistics**: Get insights into your project's dependency structure
+
+### 🎨 Improved Scene & Resource Generation
+- **Enhanced .tscn Parsing**: Better scene file generation with proper node hierarchies
+- **Resource File Support**: Full support for .tres resource file generation
+- **Automatic Resource Creation**: Generate resources directly from AI responses
+
+### 🤖 Multi-Model Support
+- **Multiple AI Providers**: Support for Claude (Anthropic), GPT-4, GPT-3.5, and local models
+- **Easy Provider Switching**: Switch between AI providers without changing code
+- **Unified API**: Same interface for all providers
+
+### 🏠 Offline Mode with Local Models
+- **Ollama Integration**: Use local models via Ollama for offline development
+- **Privacy-First**: Keep your code private with local model inference
+- **No API Costs**: Develop without API usage when using local models
+
+### 🔍 Code Analysis & Refactoring
+- **Code Quality Analysis**: Automatic code quality scoring and issue detection
+- **Performance Suggestions**: Get optimization recommendations for your code
+- **Refactoring Opportunities**: Identify code that can be improved
+- **Best Practices**: Suggestions for following Godot and GDScript best practices
+
+### 📊 Visual Scripting Integration
+- **Visual Script Analysis**: Analyze and understand visual scripts
+- **Conversion Tools**: Convert between visual scripts and GDScript
+- **Integration Support**: Work seamlessly with Godot's visual scripting system
+
+### 📚 Template Library
+- **Pre-built Templates**: Common game patterns ready to use
+- **2D Platformer**: Complete platformer template with player, enemies, and mechanics
+- **Top-Down Shooter**: Shooter template with movement and shooting
+- **Inventory System**: Full inventory system with UI support
+- **State Machine**: Generic state machine pattern
+- **Game Manager**: Singleton game manager template
+- **Easy Application**: Apply templates with a single function call
 
 ---
 

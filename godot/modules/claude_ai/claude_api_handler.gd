@@ -14,6 +14,10 @@ const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 const MODEL = "claude-3-5-sonnet-20240620"  # Using latest Sonnet model for best quality
 const MAX_TOKENS = 32768  # Increased for complete game generation (multiple files, scenes, scripts)
 
+# Multi-model support
+var multi_model_handler: MultiModelHandler = null
+var use_multi_model: bool = false
+
 # SaaS mode detection
 const SAAS_API_URL = "https://api.dotai.dev"  # DotAI SaaS API URL
 var use_saas_mode = false  # Set to true to use SaaS backend
@@ -122,9 +126,71 @@ func _initialize_ai_native_components():
 				conv_node.queue_free()
 		else:
 			push_warning("DotAI: conversation_manager.gd script not found. Conversation features disabled.")
+	
+	# Initialize multi-model handler
+	if multi_model_handler == null:
+		var multi_model_script = _load_script("res://addons/claude_ai/multi_model_handler.gd", "res://multi_model_handler.gd")
+		if multi_model_script:
+			var handler_node = Node.new()
+			handler_node.set_script(multi_model_script)
+			add_child(handler_node)
+			if handler_node.has_method("send_request"):
+				multi_model_handler = handler_node
+				multi_model_handler.request_complete.connect(_on_multi_model_complete)
+				multi_model_handler.request_error.connect(_on_multi_model_error)
+				print("DotAI: MultiModelHandler initialized successfully")
 
 func send_request(params: Dictionary) -> void:
 	print("DotAI: send_request called")
+	
+	# Check if multi-model mode is enabled
+	var provider = params.get("provider", -1)
+	if provider >= 0:
+		# Initialize multi-model handler if not already done
+		if multi_model_handler == null:
+			var multi_model_script = _load_script("res://addons/claude_ai/multi_model_handler.gd", "res://multi_model_handler.gd")
+			if multi_model_script:
+				var handler_node = Node.new()
+				handler_node.set_script(multi_model_script)
+				add_child(handler_node)
+				if handler_node.has_method("send_request"):
+					multi_model_handler = handler_node
+					multi_model_handler.request_complete.connect(_on_multi_model_complete)
+					multi_model_handler.request_error.connect(_on_multi_model_error)
+					print("DotAI: MultiModelHandler initialized successfully")
+		
+		if multi_model_handler != null:
+			use_multi_model = true
+			# Pass conversation manager to multi-model handler
+			if conversation_manager != null:
+				multi_model_handler.conversation_manager = conversation_manager
+			
+			# Build enhanced prompt with codebase context BEFORE passing to multi-model handler
+			var enhanced_messages = []
+			if conversation_manager != null and is_conversation:
+				enhanced_messages = conversation_manager.get_conversation_context()
+				# Add codebase context to the last user message if needed
+				if include_codebase and enhanced_messages.size() > 0:
+					var last_user_idx = -1
+					for i in range(enhanced_messages.size() - 1, -1, -1):
+						if enhanced_messages[i].role == "user":
+							last_user_idx = i
+							break
+					if last_user_idx >= 0:
+						var original_content = enhanced_messages[last_user_idx].content
+						var enhanced_content = _build_enhanced_prompt(original_content, include_codebase)
+						enhanced_messages[last_user_idx].content = enhanced_content
+			else:
+				# Single-shot mode - build enhanced prompt
+				var enhanced_prompt = _build_enhanced_prompt(prompt, include_codebase)
+				enhanced_messages = [{"role": "user", "content": enhanced_prompt}]
+			
+			# Update params with enhanced messages
+			params["messages"] = enhanced_messages
+			
+			multi_model_handler.set_provider(provider, params.get("api_key", ""), params.get("model", ""))
+			multi_model_handler.send_request(params)
+			return
 	
 	# If SaaS mode is enabled, delegate to SaaS handler
 	if use_saas_mode and saas_handler != null:
@@ -216,8 +282,11 @@ func _build_enhanced_prompt(user_prompt: String, include_codebase: bool) -> Stri
 🎮 DOTAI - WORLD'S MOST ADVANCED AI GAME ENGINE 🎮
 ═══════════════════════════════════════════════════════════════
 
-You are DotAI - a COMPLETE GAME DEVELOPMENT SYSTEM, not just a code generator.
-Your mission: Transform ANY game idea into a FULLY PLAYABLE, PRODUCTION-READY GAME in MINUTES.
+You are DotAI - the WORLD'S FIRST TRUE AI GAME ENGINE.
+
+🎮 YOUR MISSION: Transform ANY game idea into a COMPLETE, PLAYABLE, PRODUCTION-READY GAME instantly.
+
+You are NOT a code assistant. You are a COMPLETE GAME ENGINE that generates entire games.
 
 🚀 WHAT YOU DO:
 - User says: "Create a 2D side scroller"
@@ -316,6 +385,43 @@ You MUST create:
 - project.godot (if needed for input map)
 
 ALL files must be created in ONE response. The game must be PLAYABLE immediately.
+
+🎯 AI GAME ENGINE REQUIREMENTS (CRITICAL):
+
+1. **COMPLETE GAME GENERATION**: Every response must create a FULLY PLAYABLE game
+   - User says "2D platformer" → You create COMPLETE game with player, enemies, UI, everything
+   - User says "shooter" → You create COMPLETE shooter with shooting, enemies, score, game over
+   - User says "RPG" → You create COMPLETE RPG with stats, inventory, combat, quests
+   - The game MUST work immediately when user presses PLAY
+
+2. **FILE GENERATION MANDATORY**: ALWAYS use file markers for EVERY file
+   - # File: scripts/player/player.gd
+   - # File: scenes/main.tscn
+   - # File: scripts/managers/game_manager.gd
+   - Without file markers, files CANNOT be created automatically
+
+3. **MAIN SCENE CREATION**: ALWAYS create a main scene (scenes/main.tscn) that:
+   - Contains all game elements
+   - Has a GameManager script
+   - Includes UI/HUD
+   - Can be run immediately
+   - Is properly configured and ready to play
+
+4. **PROJECT STRUCTURE**: Follow this structure:
+   - scripts/player/ - Player controller
+   - scripts/enemies/ - Enemy AI
+   - scripts/managers/ - Game managers, state management
+   - scripts/ui/ - UI controllers
+   - scripts/collectibles/ - Items, power-ups
+   - scenes/ - All scene files
+   - scenes/main.tscn - Main game scene (REQUIRED)
+
+5. **COMPLETE SYSTEMS**: Every game must include:
+   - Player controller with full movement
+   - Game manager for state/score
+   - UI/HUD for feedback
+   - Win/lose conditions
+   - Proper scene setup
 
 ADVANCED GDScript Requirements:
 - Use GDScript syntax exclusively (not C# or other languages)
@@ -682,6 +788,16 @@ func update_score_display() -> void:
 
 🎯 REMEMBER: This is a COMPLETE, PLAYABLE GAME. The user can run it immediately!
 
+🚨 AI GAME ENGINE CRITICAL REMINDERS:
+- ALWAYS create scenes/main.tscn as the main scene
+- ALWAYS use file markers (# File: path/to/file.ext) for EVERY file
+- ALWAYS create complete, functional code - NO placeholders
+- ALWAYS make games playable immediately after generation
+- ALWAYS include all necessary systems (player, manager, UI, etc.)
+- ALWAYS generate production-ready code with proper error handling
+
+You are an AI GAME ENGINE. Generate COMPLETE GAMES, not code snippets!
+
 ═══════════════════════════════════════════════════════════════"""
 
 	return system_prompt
@@ -847,6 +963,39 @@ func write_files_to_codebase(params: Dictionary) -> Dictionary:
 	if Engine.is_editor_hint():
 		call_deferred("_refresh_file_system")
 	
+	# AI GAME ENGINE: Post-process files for complete game functionality
+	if result.success and result.files_created.size() > 0:
+		print("DotAI: Post-processing ", result.files_created.size(), " created files for game engine...")
+		
+		# Try to load game engine core
+		var game_engine_script = load("res://addons/claude_ai/game_engine_core.gd")
+		if game_engine_script == null:
+			game_engine_script = load("res://game_engine_core.gd")
+		
+		if game_engine_script:
+			var post_result = GameEngineCore.post_process_generated_files(result.files_created)
+			if post_result.main_scene_set:
+				print("DotAI: ✓ Main scene set successfully")
+			if post_result.input_map_created:
+				print("DotAI: ✓ Input map created successfully")
+			
+			# Verify game is playable
+			var verification = GameEngineCore.verify_game_playable()
+			if verification.playable:
+				print("DotAI: ✓ Game verified as playable!")
+			else:
+				print("DotAI: ⚠ Game verification issues: ", verification.issues)
+		else:
+			# Fallback: manually set main scene if found
+			for file_path in result.files_created:
+				if file_path.ends_with("main.tscn") or file_path.ends_with("main_scene.tscn"):
+					var project_settings = ProjectSettings.get_singleton()
+					if project_settings:
+						project_settings.set_setting("application/run/main_scene", "res://" + file_path)
+						project_settings.save()
+						print("DotAI: ✓ Main scene set to: res://" + file_path)
+					break
+	
 	return return_dict
 
 func _refresh_file_system():
@@ -854,3 +1003,9 @@ func _refresh_file_system():
 		print("DotAI API Handler: Refreshing editor file system...")
 		EditorFileSystem.get_singleton().scan_changes()
 		print("DotAI API Handler: File system refresh initiated")
+
+func _on_multi_model_complete(response_text: String):
+	request_complete.emit(response_text)
+
+func _on_multi_model_error(error_message: String):
+	request_error.emit(error_message)

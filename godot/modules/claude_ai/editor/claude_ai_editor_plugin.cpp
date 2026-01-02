@@ -43,6 +43,7 @@
 #include "scene/gui/box_container.h"
 #include "scene/gui/line_edit.h"
 #include "scene/gui/rich_text_label.h"
+#include "scene/gui/option_button.h"
 #include "core/io/config_file.h"
 #include "core/io/resource_loader.h"
 #include "core/io/file_access.h"
@@ -74,6 +75,7 @@ private:
 	Button *write_to_codebase_button = nullptr;
 	CheckBox *auto_save_checkbox = nullptr;
 	LineEdit *api_key_input = nullptr;
+	OptionButton *provider_dropdown = nullptr;
 	Label *status_label = nullptr;
 	Node *api_handler = nullptr;
 	bool codebase_aware = true;
@@ -126,6 +128,7 @@ private:
 	String _format_message_content(const String &content); // Format message content with BBCode
 	void _on_save_code_from_message(const String &content); // Save code from message
 	void _on_copy_code_from_message(const String &content); // Copy code from message
+	void _on_provider_changed(int index); // Handle provider dropdown change
 
 protected:
 	static void _bind_methods();
@@ -153,6 +156,7 @@ void ClaudeAIDock::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_on_ai_question", "question"), &ClaudeAIDock::_on_ai_question);
 	ClassDB::bind_method(D_METHOD("_on_save_code_from_message", "content"), &ClaudeAIDock::_on_save_code_from_message);
 	ClassDB::bind_method(D_METHOD("_on_copy_code_from_message", "content"), &ClaudeAIDock::_on_copy_code_from_message);
+	ClassDB::bind_method(D_METHOD("_on_provider_changed", "index"), &ClaudeAIDock::_on_provider_changed);
 	ClassDB::bind_method(D_METHOD("_reload_api_handler"), &ClaudeAIDock::_reload_api_handler);
 	ClassDB::bind_method(D_METHOD("_verify_api_handler_methods"), &ClaudeAIDock::_verify_api_handler_methods);
 	ClassDB::bind_method(D_METHOD("_retry_write_after_reload", "response_text", "is_auto"), &ClaudeAIDock::_retry_write_after_reload);
@@ -179,7 +183,26 @@ ClaudeAIDock::ClaudeAIDock() {
 	if (false) { // Disabled for testing
 		_setup_saas_ui();
 	} else {
-		// Direct API mode - show API key input
+		// Direct API mode - show provider dropdown and API key input
+		// Provider selection dropdown
+		HBoxContainer *provider_container = memnew(HBoxContainer);
+		Label *provider_label = memnew(Label);
+		provider_label->set_text(TTR("Provider:"));
+		provider_label->set_custom_minimum_size(Size2(80 * EDSCALE, 0));
+		provider_container->add_child(provider_label);
+
+		provider_dropdown = memnew(OptionButton);
+		provider_dropdown->add_item(TTR("Claude (Anthropic)"), 0);
+		provider_dropdown->add_item(TTR("GPT-4 (OpenAI)"), 1);
+		provider_dropdown->add_item(TTR("GPT-3.5 (OpenAI)"), 2);
+		provider_dropdown->add_item(TTR("Ollama (Local)"), 3);
+		provider_dropdown->select(0); // Default to Claude
+		provider_dropdown->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		provider_dropdown->connect(SceneStringName(item_selected), callable_mp(this, &ClaudeAIDock::_on_provider_changed));
+		provider_container->add_child(provider_dropdown);
+		main_container->add_child(provider_container);
+
+		// API key input
 		HBoxContainer *api_key_container = memnew(HBoxContainer);
 		Label *api_key_label = memnew(Label);
 		api_key_label->set_text(TTR("API Key:"));
@@ -320,10 +343,25 @@ void ClaudeAIDock::_send_request() {
 	// 	return;
 	// }
 	
-	// Check if API key is provided (required)
-	if (!use_saas_mode && (!api_key_input || api_key_input->get_text().is_empty())) {
+	// Check if API key is provided (required, except for Ollama)
+	int provider_index = 0;
+	if (provider_dropdown) {
+		provider_index = provider_dropdown->get_selected_id();
+	}
+	
+	if (!use_saas_mode && provider_index != 3 && (!api_key_input || api_key_input->get_text().is_empty())) {
 		if (status_label) {
-			status_label->set_text(TTR("Error: API key is required. Please enter your Claude API key."));
+			String provider_name = "API";
+			switch (provider_index) {
+				case 0:
+					provider_name = "Claude";
+					break;
+				case 1:
+				case 2:
+					provider_name = "OpenAI";
+					break;
+			}
+			status_label->set_text(TTR("Error: API key is required. Please enter your ") + provider_name + TTR(" API key."));
 			status_label->set_visible(true);
 		}
 		return;
@@ -349,8 +387,29 @@ void ClaudeAIDock::_send_request() {
 		}
 
 		Dictionary params;
+		// Get selected provider
+		int provider_index = 0; // Default to Claude
+		if (provider_dropdown) {
+			provider_index = provider_dropdown->get_selected_id();
+		}
+		params["provider"] = provider_index;
+		
 		// API key is required - get it from the input field
-		if (!use_saas_mode && api_key_input) {
+		// Note: Ollama doesn't require an API key
+		if (!use_saas_mode && api_key_input && provider_index != 3) {
+			if (api_key_input->get_text().is_empty()) {
+				if (status_label) {
+					status_label->set_text(TTR("Error: API key is required for this provider."));
+					status_label->set_visible(true);
+				}
+				if (send_button) {
+					send_button->set_disabled(false);
+				}
+				if (write_to_codebase_button) {
+					write_to_codebase_button->set_disabled(false);
+				}
+				return;
+			}
 			params["api_key"] = api_key_input->get_text();
 		}
 		params["prompt"] = prompt_input->get_text();
@@ -411,12 +470,12 @@ void ClaudeAIDock::_on_request_complete(const String &response_text) {
 		                response_text.contains("[ext_resource") ||
 		                response_text.contains("[node");
 		
-		// Always try to write if code is detected OR if response is substantial
-		// Let FileWriter decide if there's actually code to save
-		if (has_code || response_text.length() > 100) {
-			// Automatically write files - Cursor-like seamless experience
+		// AI GAME ENGINE: Always try to write if code is detected OR if response is substantial
+		// Be aggressive about saving - user expects complete games
+		if (has_code || response_text.length() > 50) {
+			// Automatically write files - seamless game creation experience
 			if (status_label) {
-				status_label->set_text(TTR("Writing files to project..."));
+				status_label->set_text(TTR("Creating game files..."));
 				status_label->set_visible(true);
 			}
 			call_deferred("_write_to_codebase_auto");
@@ -573,6 +632,29 @@ void ClaudeAIDock::_write_to_codebase_internal(bool is_auto) {
 				
 				if (status_label) {
 					status_label->set_text(message);
+				}
+				
+				// AI GAME ENGINE: Post-process files - set main scene automatically
+				if (files_created.size() > 0) {
+					// Find main scene file
+					for (int i = 0; i < files_created.size(); i++) {
+						String file_path = files_created[i];
+						if (file_path.ends_with("main.tscn") || file_path.ends_with("main_scene.tscn") || 
+						    (file_path.ends_with(".tscn") && files_created.size() == 1)) {
+							// Set as main scene in project settings
+							ProjectSettings *project_settings = ProjectSettings::get_singleton();
+							if (project_settings) {
+								String full_path = "res://" + file_path;
+								project_settings->set_setting("application/run/main_scene", full_path);
+								project_settings->save();
+								print_line("DotAI: ✓ Main scene set to: " + full_path);
+								if (status_label) {
+									status_label->set_text(message + TTR(" - Main scene set!"));
+								}
+								break;
+							}
+						}
+					}
 				}
 				
 				// Refresh file system
@@ -1314,6 +1396,39 @@ void ClaudeAIDock::_on_copy_code_from_message(const String &content) {
 			status_label->set_visible(true);
 		}
 	}
+}
+
+void ClaudeAIDock::_on_provider_changed(int index) {
+	if (!api_key_input || !provider_dropdown) {
+		return;
+	}
+	
+	// Update placeholder text based on selected provider
+	String placeholder_text;
+	switch (index) {
+		case 0: // Claude
+			placeholder_text = TTR("Enter your Claude API key (required)");
+			api_key_input->set_visible(true);
+			break;
+		case 1: // GPT-4
+			placeholder_text = TTR("Enter your OpenAI API key (required)");
+			api_key_input->set_visible(true);
+			break;
+		case 2: // GPT-3.5
+			placeholder_text = TTR("Enter your OpenAI API key (required)");
+			api_key_input->set_visible(true);
+			break;
+		case 3: // Ollama
+			placeholder_text = TTR("No API key needed for local Ollama");
+			api_key_input->set_visible(false);
+			break;
+		default:
+			placeholder_text = TTR("Enter your API key (required)");
+			api_key_input->set_visible(true);
+			break;
+	}
+	
+	api_key_input->set_placeholder(placeholder_text);
 }
 
 /////////////////////////////////////////////////////////////////////////////////

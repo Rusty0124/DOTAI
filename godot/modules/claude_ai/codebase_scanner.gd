@@ -63,6 +63,11 @@ static func scan_and_cache_project(root_path: String = "res://", force_refresh: 
 	# Build dependency graph
 	_build_dependency_graph()
 	
+	# Build enhanced dependency graph if available
+	var dependency_graph_script = load("res://addons/claude_ai/dependency_graph.gd")
+	if dependency_graph_script:
+		DependencyGraph.build_graph(root_path)
+	
 	_project_cache[root_path] = structure
 	return structure
 
