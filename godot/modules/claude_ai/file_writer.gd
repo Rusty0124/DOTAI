@@ -1,25 +1,9 @@
 @tool
 extends RefCounted
 
-## File Writer for Claude AI
-## Allows AI-generated code to be written to project files
-
 class_name FileWriter
 
-## Note: class_name registration happens in register_types if needed
-
-## Parse AI response and write files (AI Game Engine - supports all file types)
-## Supports multiple formats:
-## 1. # File: path/to/file.gd (GDScript)
-## 2. # File: path/to/file.tscn (Scene files)
-## 3. # File: path/to/file.tres (Resource files)
-## 4. ```gdscript:path/to/file.gd
-## 5. File: path/to/file.gd
-## 
-## Enhanced with .tres resource file support and improved scene parsing
 static func parse_and_write_files(response_text: String, project_root: String = "res://") -> Dictionary:
-	print("DotAI FileWriter: Starting to parse and write files...")
-	print("DotAI FileWriter: Response text length: ", response_text.length())
 	
 	var result = {
 		"success": false,  # Will be set to true if any files are written successfully
@@ -127,265 +111,39 @@ static func parse_and_write_files(response_text: String, project_root: String = 
 			"is_new": not _file_exists(_resolve_path(project_root, current_file))
 		})
 	
-	# If no file markers found, try to extract from code blocks or treat as single file
+	# Fallback: extract code from markdown blocks if no file markers found
 	if files.size() == 0:
-		print("DotAI FileWriter: No file markers found, attempting to extract code...")
-		
-		# Try to extract ALL code blocks from markdown (handle multiple blocks)
-		# More flexible regex: handles with/without language tag, with/without newline after ```
 		var code_regex = RegEx.new()
-		code_regex.compile("```(?:gdscript|gd|gdscript)?\\s*\\n?([\\s\\S]*?)```")
+		code_regex.compile("```(?:gdscript|gd)?\\s*\\n?([\\s\\S]*?)```")
 		var code_matches = code_regex.search_all(response_text)
 		
 		if code_matches.size() > 0:
-			print("DotAI FileWriter: Found ", code_matches.size(), " code block(s)")
 			for i in range(code_matches.size()):
-				var code_match = code_matches[i]
-				var code_content = code_match.get_string(1).strip_edges()
-				print("DotAI FileWriter: Code block ", i + 1, " content length: ", code_content.length())
-				
-				if code_content.length() > 10:  # Minimum content check
+				var code_content = code_matches[i].get_string(1).strip_edges()
+				if code_content.length() > 10:
 					var lines = code_content.split("\n")
-					var first_line = lines[0] if lines.size() > 0 else ""
-					
-					# Try to infer filename from class_name or extends
-					var inferred_path = _infer_filename_from_code(first_line, code_content)
-					
-					# If multiple blocks, add index to filename
+					var inferred_path = _infer_filename_from_code(lines[0] if lines.size() > 0 else "", code_content)
 					if code_matches.size() > 1:
-						var base_path = inferred_path.get_basename()
-						var extension = inferred_path.get_extension()
-						inferred_path = base_path + "_" + str(i + 1) + "." + extension
-					
-					files.append({
-						"path": inferred_path,
-						"content": code_content,
-						"is_new": true
-					})
-					print("DotAI FileWriter: Extracted code block to file: ", inferred_path)
+						var base = inferred_path.get_basename()
+						var ext = inferred_path.get_extension()
+						inferred_path = base + "_" + str(i + 1) + "." + ext
+					files.append({"path": inferred_path, "content": code_content, "is_new": true})
 		
-		# If still no files, check if response contains GDScript code directly
-		if files.size() == 0 and response_text.strip_edges() != "":
-			# Check if response looks like code (contains GDScript keywords)
-			var looks_like_code = false
-			var code_keywords = ["extends ", "class_name", "func ", "var ", "const ", "signal ", "@export", "@tool", "@onready"]
+		# Last resort: detect code without markdown blocks
+		if files.size() == 0:
+			var code_keywords = ["extends ", "class_name", "func ", "[gd_scene", "[ext_resource", "[node"]
 			for keyword in code_keywords:
 				if keyword in response_text:
-					looks_like_code = true
+					var cleaned = _extract_code_from_text(response_text)
+					if cleaned.length() > 10:
+						var lines = cleaned.split("\n")
+						var inferred_path = _infer_filename_from_code(lines[0] if lines.size() > 0 else "", cleaned)
+						files.append({"path": inferred_path, "content": cleaned, "is_new": true})
 					break
-			
-			# Also check for scene file markers
-			if "[gd_scene" in response_text or "[ext_resource" in response_text or "[node" in response_text:
-				looks_like_code = true
-			
-			if looks_like_code:
-				print("DotAI FileWriter: Response contains code keywords, treating as code file...")
-				# Remove any markdown formatting or explanations
-				var cleaned_text = response_text.strip_edges()
-				
-				# Try to remove markdown code block markers if present
-				if cleaned_text.begins_with("```"):
-					var parts = cleaned_text.split("```")
-					if parts.size() >= 3:
-						cleaned_text = parts[1].strip_edges()
-						# Remove language identifier if present
-						if "\n" in cleaned_text:
-							var first_newline = cleaned_text.find("\n")
-							var first_line = cleaned_text.substr(0, first_newline)
-							if "gdscript" in first_line.to_lower() or "gd" in first_line.to_lower():
-								cleaned_text = cleaned_text.substr(first_newline + 1).strip_edges()
-				
-				# Remove explanations before code (lines that don't look like code)
-				var lines = cleaned_text.split("\n")
-				var code_start_idx = 0
-				for i in range(lines.size()):
-					var line = lines[i].strip_edges()
-					if line.begins_with("extends") or \
-					   line.begins_with("class_name") or \
-					   line.begins_with("@tool") or \
-					   line.begins_with("func ") or \
-					   line.begins_with("var ") or \
-					   line.begins_with("[gd_scene") or \
-					   line.begins_with("[ext_resource") or \
-					   line.begins_with("[node"):
-						code_start_idx = i
-						break
-				
-				if code_start_idx > 0:
-					cleaned_text = "\n".join(lines.slice(code_start_idx))
-				
-				if cleaned_text.length() > 10:  # Minimum content check
-					var first_line = lines[code_start_idx] if lines.size() > code_start_idx else ""
-					var inferred_path = _infer_filename_from_code(first_line, cleaned_text)
-					files.append({
-						"path": inferred_path,
-						"content": cleaned_text,
-						"is_new": true
-					})
-					print("DotAI FileWriter: Extracted code to file: ", inferred_path, " (", cleaned_text.length(), " chars)")
-	
-	print("DotAI FileWriter: Found ", files.size(), " file(s) to write")
-	
-	# AI GAME ENGINE MODE: If no files found but code detected, be more aggressive
-	if files.size() == 0:
-		print("DotAI FileWriter: WARNING - No files detected after parsing!")
-		print("DotAI FileWriter: Response text length: ", response_text.length())
-		print("DotAI FileWriter: Response text preview (first 1000 chars): ", response_text.substr(0, 1000))
 		
-		# Last resort: if response has any code-like content, save it
-		# Be very aggressive - save anything that looks remotely like code
-		if response_text.strip_edges().length() > 10:
-			var has_code_content = false
-			var code_indicators = [
-				"extends", "class_name", "func ", "var ", "const ", "signal ",
-				"@export", "@tool", "@onready", "[gd_scene", "[ext_resource", "[node",
-				"CharacterBody2D", "CharacterBody3D", "Node2D", "Node3D", "Control",
-				"_ready()", "_process(", "_physics_process(", "ProjectSettings", "Input."
-			]
-			for indicator in code_indicators:
-				if indicator in response_text:
-					has_code_content = true
-					break
-			
-			# Also check for GDScript patterns using regex
-			if not has_code_content:
-				var gdscript_patterns = [
-					"extends\\s+[A-Za-z]",
-					"class_name\\s+[A-Za-z]",
-					"func\\s+[a-z_]",
-					"@export\\s+var",
-					"@onready\\s+var"
-				]
-				for pattern_str in gdscript_patterns:
-					var regex = RegEx.new()
-					if regex.compile(pattern_str) == OK:
-						if regex.search(response_text):
-							has_code_content = true
-							break
-			
-			if has_code_content:
-				print("DotAI FileWriter: Detected code content, creating fallback file...")
-				
-				# Try to extract code from markdown blocks first
-				var cleaned_content = response_text.strip_edges()
-				
-				# Look for code blocks anywhere in the text
-				var code_block_pattern = RegEx.new()
-				code_block_pattern.compile("```(?:gdscript|gd|gdscript)?\\s*\\n?([\\s\\S]*?)```")
-				var block_match = code_block_pattern.search(cleaned_content)
-				
-				if block_match:
-					cleaned_content = block_match.get_string(1).strip_edges()
-					print("DotAI FileWriter: Extracted code from markdown block")
-				else:
-					# No markdown block, try to find code in the text
-					var lines = cleaned_content.split("\n")
-					var code_start_idx = 0
-					
-					# Find where code starts (look for GDScript keywords)
-					for i in range(lines.size()):
-						var line = lines[i].strip_edges()
-						if line.begins_with("extends") or \
-						   line.begins_with("class_name") or \
-						   line.begins_with("@tool") or \
-						   line.begins_with("func ") or \
-						   line.begins_with("var ") or \
-						   line.begins_with("const ") or \
-						   line.begins_with("signal ") or \
-						   line.begins_with("[gd_scene") or \
-						   line.begins_with("[ext_resource") or \
-						   line.begins_with("[node"):
-							code_start_idx = i
-							break
-					
-					if code_start_idx > 0:
-						cleaned_content = "\n".join(lines.slice(code_start_idx))
-					
-					# Remove any remaining markdown formatting
-					if cleaned_content.begins_with("```"):
-						var parts = cleaned_content.split("```")
-						if parts.size() >= 3:
-							cleaned_content = parts[1].strip_edges()
-							# Remove language identifier if present
-							if "\n" in cleaned_content:
-								var first_newline = cleaned_content.find("\n")
-								var first_line_check = cleaned_content.substr(0, first_newline)
-								if "gdscript" in first_line_check.to_lower() or "gd" in first_line_check.to_lower():
-									cleaned_content = cleaned_content.substr(first_newline + 1).strip_edges()
-				
-				if cleaned_content.length() > 10:
-					var lines = cleaned_content.split("\n")
-					var first_line = lines[0] if lines.size() > 0 else ""
-					var inferred_path = _infer_filename_from_code(first_line, cleaned_content)
-					
-					files.append({
-						"path": inferred_path,
-						"content": cleaned_content,
-						"is_new": true
-					})
-					print("DotAI FileWriter: Created fallback file: ", inferred_path, " (", cleaned_content.length(), " chars)")
-			else:
-				# AI Game Engine: Be more lenient - try to extract any code-like content
-				print("DotAI FileWriter: No explicit code indicators, but checking for code patterns...")
-				
-				# Look for any GDScript-like patterns
-				var code_patterns = [
-					"extends\\s+[A-Za-z]",
-					"class_name\\s+[A-Za-z]",
-					"func\\s+[a-z_]",
-					"@export\\s+var",
-					"@onready\\s+var",
-					"var\\s+[a-z_].*:",
-					"const\\s+[A-Z_].*=",
-					"signal\\s+[a-z_]"
-				]
-				
-				var found_pattern = false
-				for pattern in code_patterns:
-					var regex = RegEx.new()
-					if regex.compile(pattern) == OK:
-						if regex.search(response_text):
-							found_pattern = true
-							break
-				
-				if found_pattern:
-					print("DotAI FileWriter: Found code patterns, attempting to extract...")
-					# Try one more time with pattern-based extraction
-					var lines = response_text.split("\n")
-					var code_lines = []
-					var in_code = false
-					
-					for line in lines:
-						var stripped = line.strip_edges()
-						if stripped.begins_with("extends") or stripped.begins_with("class_name") or stripped.begins_with("@tool"):
-							in_code = true
-						
-						if in_code:
-							code_lines.append(line)
-						
-						# Stop if we hit a markdown code block end or another section
-						if stripped == "```" and in_code:
-							break
-					
-					if code_lines.size() > 5:  # Minimum code lines
-						var code_content = "\n".join(code_lines)
-						var inferred_path = _infer_filename_from_code(code_lines[0] if code_lines.size() > 0 else "", code_content)
-						files.append({
-							"path": inferred_path,
-							"content": code_content,
-							"is_new": true
-						})
-						print("DotAI FileWriter: Extracted code from patterns: ", inferred_path)
-					else:
-						result.error = "Code patterns detected but insufficient code extracted"
-						result.messages.append("⚠ " + result.error)
-				else:
-					result.error = "No code detected in response. Response may be explanation only."
-					result.messages.append("⚠ " + result.error)
-					print("DotAI FileWriter: No code indicators found in response")
-		else:
-			result.error = "Response text is too short or empty"
-			result.messages.append("⚠ " + result.error)
+		if files.size() == 0:
+			result.error = "No code detected in response"
+			result.messages.append(result.error)
 	
 	# Parse and add .tres resources from response
 	var resource_generator_script = load("res://addons/claude_ai/resource_generator.gd")
@@ -397,57 +155,56 @@ static func parse_and_write_files(response_text: String, project_root: String = 
 	# Write files
 	for file_data in files:
 		var file_path = file_data.path
-		
-		# Ensure path starts with res://
 		if not file_path.begins_with("res://"):
 			file_path = _resolve_path(project_root, file_path)
 		
-		print("DotAI FileWriter: ========================================")
-		print("DotAI FileWriter: Processing file: ", file_path)
-		print("DotAI FileWriter: Content length: ", file_data.content.length())
-		print("DotAI FileWriter: Is new file: ", file_data.get("is_new", true))
-		
 		var is_new_file = file_data.get("is_new", true)
-		
-		# Handle .tres files specially
-		if file_path.ends_with(".tres"):
-			var write_result = _write_resource_file(file_path, file_data.content)
-		else:
-			var write_result = write_file(file_path, file_data.content)
-		
-		print("DotAI FileWriter: Write result - Success: ", write_result.success, " Error: ", write_result.error)
+		var write_result = _write_resource_file(file_path, file_data.content) if file_path.ends_with(".tres") else write_file(file_path, file_data.content)
 		
 		if write_result.success:
-			# Set success flag if at least one file was written successfully
 			result.success = true
 			result.files_written.append(file_path)
 			if is_new_file:
 				result.files_created.append(file_path)
-				result.messages.append("✓ Created: " + file_path)
+				result.messages.append("Created: " + file_path)
 			else:
 				result.files_modified.append(file_path)
-				result.messages.append("✓ Modified: " + file_path)
+				result.messages.append("Modified: " + file_path)
 		else:
 			result.files_failed.append(file_path)
-			result.messages.append("✗ Failed: " + file_path + " - " + write_result.error)
+			result.messages.append("Failed: " + file_path + " - " + write_result.error)
 	
-	# If no files were written and no error was set, set a generic error
 	if result.files_written.size() == 0 and result.error == "":
-		result.error = "No files were written. Check response format and ensure code is present."
-	
-	# Log final result
-	print("DotAI FileWriter: ========================================")
-	print("DotAI FileWriter: Final result - Success: ", result.success)
-	print("DotAI FileWriter: Files written: ", result.files_written.size())
-	print("DotAI FileWriter: Files created: ", result.files_created.size())
-	print("DotAI FileWriter: Files failed: ", result.files_failed.size())
-	if result.error != "":
-		print("DotAI FileWriter: Error: ", result.error)
-	print("DotAI FileWriter: ========================================")
+		result.error = "No files were written"
 	
 	return result
 
-## Infer filename from code content (enhanced for AI Game Engine)
+static func _extract_code_from_text(text: String) -> String:
+	var cleaned = text.strip_edges()
+	if cleaned.begins_with("```"):
+		var parts = cleaned.split("```")
+		if parts.size() >= 3:
+			cleaned = parts[1].strip_edges()
+			if "\n" in cleaned:
+				var first_newline = cleaned.find("\n")
+				var first_line = cleaned.substr(0, first_newline)
+				if "gdscript" in first_line.to_lower() or "gd" in first_line.to_lower():
+					cleaned = cleaned.substr(first_newline + 1).strip_edges()
+	
+	var lines = cleaned.split("\n")
+	var code_start = 0
+	for i in range(lines.size()):
+		var line = lines[i].strip_edges()
+		if line.begins_with("extends") or line.begins_with("class_name") or line.begins_with("@tool") or \
+		   line.begins_with("[gd_scene") or line.begins_with("[ext_resource") or line.begins_with("[node"):
+			code_start = i
+			break
+	
+	if code_start > 0:
+		cleaned = "\n".join(lines.slice(code_start))
+	
+	return cleaned
+
 static func _infer_filename_from_code(first_line: String, full_text: String) -> String:
 	# AI GAME ENGINE: Enhanced filename inference
 	# Try to extract class_name first (most reliable)
@@ -583,157 +340,51 @@ static func _resolve_path(project_root: String, relative_path: String) -> String
 static func _file_exists(file_path: String) -> bool:
 	return FileAccess.file_exists(file_path)
 
-## Write content to a file with validation and optimization
 static func write_file(file_path: String, content: String) -> Dictionary:
-	print("DotAI FileWriter: write_file called for: ", file_path, " (content length: ", content.length(), ")")
+	var result = {"success": false, "error": ""}
 	
-	var result = {"success": false, "error": "", "warnings": [], "optimizations": []}
-	
-	# Validate content before writing
 	if content.is_empty():
 		result.error = "Cannot write empty file"
-		print("DotAI FileWriter: ERROR - Empty content")
 		return result
 	
-	# Basic syntax validation for GDScript files
-	if file_path.ends_with(".gd"):
-		var validation_result = _validate_gdscript(content, file_path)
-		if not validation_result.valid:
-			result.warnings.append_array(validation_result.issues)
-		if validation_result.warnings.size() > 0:
-			result.warnings.append_array(validation_result.warnings)
-	
-	# Ensure directory exists
 	var dir_path = file_path.get_base_dir()
-	print("DotAI FileWriter: Directory path: ", dir_path)
-	
 	if dir_path != "" and dir_path != "res://":
 		var dir = DirAccess.open("res://")
 		if dir == null:
 			result.error = "Failed to open res:// directory"
-			print("DotAI FileWriter: ERROR - Cannot open res:// directory")
 			return result
 		
 		var current_path = "res://"
 		var path_parts = dir_path.trim_prefix("res://").split("/")
-		print("DotAI FileWriter: Path parts: ", path_parts)
-		
 		for part in path_parts:
 			if part != "":
 				current_path += "/" + part
-				print("DotAI FileWriter: Checking/creating: ", current_path)
-				
 				if not dir.dir_exists(current_path):
-					var error = dir.make_dir(current_path)
-					if error != OK:
-						result.error = "Failed to create directory: " + current_path + " (error: " + str(error) + ")"
-						print("DotAI FileWriter: ERROR - Failed to create directory: ", current_path, " Error: ", error)
+					if dir.make_dir(current_path) != OK:
+						result.error = "Failed to create directory: " + current_path
 						return result
-					else:
-						print("DotAI FileWriter: Created directory: ", current_path)
-				else:
-					print("DotAI FileWriter: Directory exists: ", current_path)
 	
-	# Optimize content (basic optimizations)
 	var optimized_content = _optimize_content(content, file_path)
-	if optimized_content != content:
-		result.optimizations.append("Applied code optimizations")
-	
-	# Write file
-	print("DotAI FileWriter: Attempting to open file for writing: ", file_path)
-	
-	# In Godot 4, FileAccess.open() can return null, check error code
 	var file = FileAccess.open(file_path, FileAccess.WRITE)
 	if file == null:
-		var error_code = FileAccess.get_open_error()
-		var error_msg = "Failed to open file for writing: " + file_path
-		
-		# Provide helpful error messages based on error code
-		match error_code:
-			ERR_FILE_NOT_FOUND:
-				error_msg += " (File not found - directory may not exist)"
-			ERR_CANT_OPEN:
-				error_msg += " (Cannot open - permission denied or file locked)"
-			ERR_INVALID_PARAMETER:
-				error_msg += " (Invalid path)"
-			_:
-				error_msg += " (Error code: " + str(error_code) + ")"
-		
-		result.error = error_msg
-		print("DotAI FileWriter: ERROR - Failed to open file: ", file_path)
-		print("DotAI FileWriter: Error code: ", error_code)
-		print("DotAI FileWriter: File path details - Base dir: ", file_path.get_base_dir(), " File name: ", file_path.get_file())
-		print("DotAI FileWriter: Full path: ", file_path)
+		result.error = "Failed to open file: " + file_path
 		return result
 	
-	print("DotAI FileWriter: File opened successfully, writing content...")
 	file.store_string(optimized_content)
-	var stored_bytes = file.get_position()
 	file.close()
-	
-	print("DotAI FileWriter: Wrote ", stored_bytes, " bytes to file: ", file_path)
-	
-	# Verify file was written (give it a moment for file system to update)
-	# In Godot, files are written immediately, but verification might need a moment
 	result.success = true
-	print("DotAI FileWriter: File write completed successfully: ", file_path)
-	
-	# Optional: Verify file exists (may fail immediately after write due to file system caching)
-	# This is informational only - the write succeeded if we got here
-	if FileAccess.file_exists(file_path):
-		print("DotAI FileWriter: File verified to exist: ", file_path)
-	else:
-		print("DotAI FileWriter: NOTE - File verification check failed (file may still be written, check file system)")
-		# Don't fail here - file might exist but verification is delayed
-	
 	return result
 
-## Validate GDScript code
-static func _validate_gdscript(content: String, file_path: String) -> Dictionary:
-	var issues = []
-	var warnings = []
-	
-	# Check for basic syntax issues
-	if content.contains("extends") and not content.contains("class_name") and not content.contains("extends Node"):
-		# Check if extends is valid
-		var extends_regex = RegEx.new()
-		extends_regex.compile("extends\\s+([\\w/]+)")
-		var match = extends_regex.search(content)
-		if match:
-			var extends_class = match.get_string(1)
-			if extends_class.begins_with("res://") and not FileAccess.file_exists(extends_class):
-				warnings.append("Extends path may not exist: " + extends_class)
-	
-	# Check for common issues
-	if content.contains("get_node(\"../\")"):
-		warnings.append("Consider using get_parent() instead of get_node(\"../\")")
-	
-	if content.count("get_node") > 5:
-		warnings.append("Consider caching frequently accessed nodes for better performance")
-	
-	return {"valid": issues.size() == 0, "issues": issues, "warnings": warnings}
-
-## Optimize content
 static func _optimize_content(content: String, file_path: String) -> String:
 	var optimized = content
-	
-	# Basic optimizations
 	if file_path.ends_with(".gd"):
-		# Replace inefficient patterns
 		optimized = optimized.replace("get_node(\"../\")", "get_parent()")
 		optimized = optimized.replace("get_node(\"./\")", "self")
-		
-		# Ensure consistent line endings
-		optimized = optimized.replace("\r\n", "\n")
-		optimized = optimized.replace("\r", "\n")
-	
+		optimized = optimized.replace("\r\n", "\n").replace("\r", "\n")
 	return optimized
 
-## Write resource file (.tres)
 static func _write_resource_file(file_path: String, content: String) -> Dictionary:
-	var result = {"success": false, "error": "", "warnings": []}
-	
-	# Ensure directory exists
+	var result = {"success": false, "error": ""}
 	var dir_path = file_path.get_base_dir()
 	if dir_path != "" and dir_path != "res://":
 		var dir = DirAccess.open("res://")
@@ -743,37 +394,17 @@ static func _write_resource_file(file_path: String, content: String) -> Dictiona
 			for part in path_parts:
 				if part != "":
 					current_path += "/" + part
-					if not dir.dir_exists(current_path):
-						var error = dir.make_dir(current_path)
-						if error != OK:
-							result.error = "Failed to create directory: " + current_path
-							return result
+					if not dir.dir_exists(current_path) and dir.make_dir(current_path) != OK:
+						result.error = "Failed to create directory: " + current_path
+						return result
 	
-	# Write file
 	var file = FileAccess.open(file_path, FileAccess.WRITE)
 	if file == null:
-		result.error = "Failed to open file for writing: " + file_path
+		result.error = "Failed to open file: " + file_path
 		return result
 	
 	file.store_string(content)
 	file.close()
-	
 	result.success = true
 	return result
-
-## Extract file paths from AI response
-static func extract_file_paths(response_text: String) -> Array:
-	var paths = []
-	var regex = RegEx.new()
-	regex.compile("#\\s*File:\\s*([^\\n]+)")
-	
-	var search_text = response_text
-	while true:
-		var result = regex.search(search_text)
-		if result == null:
-			break
-		paths.append(result.get_string(1).strip_edges())
-		search_text = search_text.substr(result.get_end())
-	
-	return paths
 

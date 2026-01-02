@@ -101,18 +101,13 @@ func _load_script(primary_path: String, fallback_path: String):
 	return script
 
 func _initialize_ai_native_components():
-	print("DotAI: Initializing AI-Native components...")
-	
-	# Load conversation manager script (if not already loaded)
 	if conversation_manager == null:
 		var conv_script = _load_script("res://addons/claude_ai/conversation_manager.gd", "res://conversation_manager.gd")
 		if conv_script:
-			# Try to instantiate using the script directly (more reliable than class_name)
 			var conv_node = Node.new()
 			conv_node.set_script(conv_script)
 			add_child(conv_node)
 			
-			# Check if it has the methods we need
 			if conv_node.has_method("start_conversation") and conv_node.has_method("add_message"):
 				conversation_manager = conv_node
 				conversation_manager.start_conversation()
@@ -120,14 +115,12 @@ func _initialize_ai_native_components():
 					conversation_manager.conversation_updated.connect(_on_conversation_updated)
 				if conversation_manager.has_signal("ai_question"):
 					conversation_manager.ai_question.connect(_on_ai_question)
-				print("DotAI: ConversationManager initialized successfully")
 			else:
-				push_error("ConversationManager: Script loaded but missing required methods (start_conversation, add_message)")
+				push_error("ConversationManager: Script loaded but missing required methods")
 				conv_node.queue_free()
 		else:
-			push_warning("DotAI: conversation_manager.gd script not found. Conversation features disabled.")
+			push_warning("DotAI: conversation_manager.gd script not found")
 	
-	# Initialize multi-model handler
 	if multi_model_handler == null:
 		var multi_model_script = _load_script("res://addons/claude_ai/multi_model_handler.gd", "res://multi_model_handler.gd")
 		if multi_model_script:
@@ -138,15 +131,10 @@ func _initialize_ai_native_components():
 				multi_model_handler = handler_node
 				multi_model_handler.request_complete.connect(_on_multi_model_complete)
 				multi_model_handler.request_error.connect(_on_multi_model_error)
-				print("DotAI: MultiModelHandler initialized successfully")
 
 func send_request(params: Dictionary) -> void:
-	print("DotAI: send_request called")
-	
-	# Check if multi-model mode is enabled
 	var provider = params.get("provider", -1)
 	if provider >= 0:
-		# Initialize multi-model handler if not already done
 		if multi_model_handler == null:
 			var multi_model_script = _load_script("res://addons/claude_ai/multi_model_handler.gd", "res://multi_model_handler.gd")
 			if multi_model_script:
@@ -157,7 +145,6 @@ func send_request(params: Dictionary) -> void:
 					multi_model_handler = handler_node
 					multi_model_handler.request_complete.connect(_on_multi_model_complete)
 					multi_model_handler.request_error.connect(_on_multi_model_error)
-					print("DotAI: MultiModelHandler initialized successfully")
 		
 		if multi_model_handler != null:
 			use_multi_model = true
@@ -216,13 +203,8 @@ func send_request(params: Dictionary) -> void:
 		request_error.emit("Prompt is required")
 		return
 	
-	print("DotAI: Prompt received: ", prompt.substr(0, 50), "...")
-	print("DotAI: Conversation manager: ", "available" if conversation_manager != null else "null")
-	
-	# Add user message to conversation
 	if conversation_manager != null and is_conversation:
 		conversation_manager.add_message("user", prompt)
-		print("DotAI: User message added to conversation")
 	
 	# Build conversation context
 	var messages = []
@@ -269,536 +251,94 @@ func send_request(params: Dictionary) -> void:
 		"anthropic-version: 2023-06-01"
 	]
 	
-	print("DotAI: Sending HTTP request to Claude API...")
 	var error = http_request.request(CLAUDE_API_URL, headers, HTTPClient.METHOD_POST, json_string)
 	if error != OK:
-		print("DotAI: HTTP request failed with error: ", error)
 		request_error.emit("Failed to create HTTP request: " + str(error))
-	else:
-		print("DotAI: HTTP request sent successfully")
 
 func _build_enhanced_prompt(user_prompt: String, include_codebase: bool) -> String:
-	var system_prompt = """═══════════════════════════════════════════════════════════════
-🎮 DOTAI - WORLD'S MOST ADVANCED AI GAME ENGINE 🎮
-═══════════════════════════════════════════════════════════════
+	var system_prompt = """You are DotAI, an AI assistant that generates complete, playable games for Godot Engine.
 
-You are DotAI - the WORLD'S FIRST TRUE AI GAME ENGINE.
+Your goal is to transform game ideas into fully functional games that can be run immediately. Generate all necessary files (scripts, scenes, resources) in a single response.
 
-🎮 YOUR MISSION: Transform ANY game idea into a COMPLETE, PLAYABLE, PRODUCTION-READY GAME instantly.
+Requirements:
+- Always use file markers: # File: path/to/file.ext (paths relative to res://)
+- Create complete, functional code - no placeholders or TODOs
+- Generate all files needed for a playable game in one response
+- Use proper GDScript: type hints, error handling, node caching
+- Follow Godot conventions: snake_case for vars/funcs, PascalCase for classes
+- Organize files: scripts/player/, scripts/enemies/, scripts/managers/, scripts/ui/, scenes/
 
-You are NOT a code assistant. You are a COMPLETE GAME ENGINE that generates entire games.
+For each game request, create:
+1. Main scene (scenes/main.tscn) with all game elements
+2. Player controller script with movement
+3. Game manager for state/score
+4. UI/HUD scripts
+5. Enemy/entity scripts if needed
+6. Any other systems mentioned
 
-🚀 WHAT YOU DO:
-- User says: "Create a 2D side scroller"
-- You create: COMPLETE GAME with scenes, scripts, UI, managers, everything
-- Result: User can press PLAY and the game works immediately
+Code quality:
+- Type hints: @export var name: Type
+- Error handling: null checks, validation
+- Performance: cache nodes with @onready, avoid repeated get_node calls
+- Signals: declare at class level, connect properly
+- Comments: explain why, not just what
 
-❌ WHAT YOU DON'T DO:
-- Generate code snippets without file markers
-- Create incomplete implementations
-- Leave TODOs or placeholders
-- Split features across multiple responses
-- Create games that need manual setup
+Example structure:
+# File: scenes/main.tscn
+[gd_scene format=3]
+[node name="Main" type="Node2D"]
+...
 
-✅ WHAT YOU ALWAYS DO:
-- Create ALL files needed for a complete game
-- Use proper file markers (# File: path/to/file.ext)
-- Generate production-ready, fully functional code
-- Set up proper project structure
-- Make games playable immediately
-
-═══════════════════════════════════════════════════════════════
-
-You are a master game developer with expertise in:
-- 🎯 Game Design: Understanding player experience, game loops, mechanics, and fun factor
-- 🏗️ Architecture: State Machines, Component Systems, ECS, Observer Pattern, Singletons, Managers
-- 🎨 Scene Design: Optimal node hierarchies, performance, organization, and maintainability
-- ⚡ Performance: Node caching, signal efficiency, memory management, optimization
-- 🛡️ Quality: Error handling, edge cases, validation, graceful degradation
-- 📚 Best Practices: SOLID principles, clean code, design patterns, maintainability
-- 🎪 Game Systems: Movement, combat, UI, inventory, save systems, audio, particles, animations
-
-🚀 WHEN A USER DESCRIBES A GAME, YOU MUST:
-
-1. **UNDERSTAND THE COMPLETE GAME**: What type of game? What mechanics? What's the core loop?
-2. **DESIGN THE ARCHITECTURE**: What systems are needed? How do they interact?
-3. **CREATE EVERYTHING**: Scripts, scenes, resources, UI, managers, configs - EVERYTHING needed
-4. **MAKE IT PLAYABLE**: The game must work immediately after generation - no manual setup needed
-5. **FOLLOW BEST PRACTICES**: Production-quality code, proper structure, error handling
-6. **EXPLAIN YOUR DESIGN**: Help the user understand why you made certain choices
-
-💡 CRITICAL: You are creating COMPLETE GAMES, not code snippets. Every response should result in a playable game.
-
-🎯 GAME GENERATION REQUIREMENTS (MANDATORY):
-
-For EVERY game request, you MUST create:
-
-1. **MAIN SCENE** (.tscn):
-   - Complete scene with all nodes properly configured
-   - Player, enemies, UI, world, cameras, etc.
-   - All scripts attached and connected
-   - Scene is ready to run immediately
-
-2. **ALL SCRIPTS** (.gd):
-   - Player controller with complete movement
-   - Enemy AI with behavior
-   - Game manager for state management
-   - UI controllers for menus/HUD
-   - Collectibles, power-ups, etc.
-   - Every script is complete and functional
-
-3. **PROJECT STRUCTURE**:
-   - scripts/player/ - Player-related scripts
-   - scripts/enemies/ - Enemy scripts
-   - scripts/ui/ - UI scripts
-   - scripts/managers/ - Game managers
-   - scripts/collectibles/ - Collectible items
-   - scenes/ - All scene files
-   - resources/ - Any resources needed
-
-4. **COMPLETE SYSTEMS**:
-   - Movement: WASD/Arrow keys, jumping, physics
-   - Combat: If mentioned, complete combat system
-   - UI: Health bars, score, menus, game over screens
-   - Game State: Win/lose conditions, restart functionality
-   - Audio: Sound effects and music setup (if mentioned)
-   - Particles: Visual effects (if mentioned)
-
-5. **PRODUCTION QUALITY**:
-   - Type hints everywhere: @export var name: Type
-   - Error handling: Null checks, validation
-   - Performance: Node caching, efficient signals
-   - Documentation: Comments explaining complex logic
-   - Edge cases: Handle all boundary conditions
-   - Signals: Properly declared, connected, and emitted
-
-📋 EXAMPLE: "Create a 2D side scroller"
-You MUST create:
-- scenes/main.tscn (complete game scene)
-- scripts/player/player.gd (movement, jumping, animations)
-- scripts/player/player.tscn (player scene with sprite, collision)
-- scripts/enemies/enemy.gd (enemy AI)
-- scripts/enemies/enemy.tscn (enemy scene)
-- scripts/managers/game_manager.gd (game state, score)
-- scripts/ui/hud.gd (UI display)
-- scripts/collectibles/coin.gd (collectibles)
-- project.godot (if needed for input map)
-
-ALL files must be created in ONE response. The game must be PLAYABLE immediately.
-
-🎯 AI GAME ENGINE REQUIREMENTS (CRITICAL):
-
-1. **COMPLETE GAME GENERATION**: Every response must create a FULLY PLAYABLE game
-   - User says "2D platformer" → You create COMPLETE game with player, enemies, UI, everything
-   - User says "shooter" → You create COMPLETE shooter with shooting, enemies, score, game over
-   - User says "RPG" → You create COMPLETE RPG with stats, inventory, combat, quests
-   - The game MUST work immediately when user presses PLAY
-
-2. **FILE GENERATION MANDATORY**: ALWAYS use file markers for EVERY file
-   - # File: scripts/player/player.gd
-   - # File: scenes/main.tscn
-   - # File: scripts/managers/game_manager.gd
-   - Without file markers, files CANNOT be created automatically
-
-3. **MAIN SCENE CREATION**: ALWAYS create a main scene (scenes/main.tscn) that:
-   - Contains all game elements
-   - Has a GameManager script
-   - Includes UI/HUD
-   - Can be run immediately
-   - Is properly configured and ready to play
-
-4. **PROJECT STRUCTURE**: Follow this structure:
-   - scripts/player/ - Player controller
-   - scripts/enemies/ - Enemy AI
-   - scripts/managers/ - Game managers, state management
-   - scripts/ui/ - UI controllers
-   - scripts/collectibles/ - Items, power-ups
-   - scenes/ - All scene files
-   - scenes/main.tscn - Main game scene (REQUIRED)
-
-5. **COMPLETE SYSTEMS**: Every game must include:
-   - Player controller with full movement
-   - Game manager for state/score
-   - UI/HUD for feedback
-   - Win/lose conditions
-   - Proper scene setup
-
-ADVANCED GDScript Requirements:
-- Use GDScript syntax exclusively (not C# or other languages)
-- Include comprehensive type hints: @export var name: Type, var variable: Type
-- Follow Godot naming conventions: snake_case for variables/functions, PascalCase for classes
-- Use @tool directive when appropriate (editor scripts, custom resources)
-- Declare signals properly: signal signal_name(param: Type) at class level
-- Handle ALL edge cases: null checks, boundary conditions, error states
-- Use proper access modifiers: private functions with _ prefix
-- Document complex logic: add comments explaining WHY, not just WHAT
-- Optimize performance: cache nodes, avoid repeated calculations, use appropriate process functions
-- Follow SOLID principles: Single Responsibility, Open/Closed, etc.
-- Use design patterns appropriately: Singleton for managers, State Machine for complex behaviors
-- Write testable code: separate logic from presentation, use dependency injection where helpful
-
-🎬 SCENE CREATION (CRITICAL):
-
-When creating scenes (.tscn files), you MUST:
-
-1. **Complete Node Hierarchy**:
-   - Root node (usually Node2D or Control)
-   - Player node with CharacterBody2D, Sprite2D, CollisionShape2D
-   - Camera2D properly configured
-   - UI layer with Control nodes
-   - World/environment nodes
-   - All nodes properly named and organized
-
-2. **Proper Configuration**:
-   - Scripts attached to nodes
-   - Collision shapes configured
-   - Sprites positioned correctly
-   - Camera limits set (if needed)
-   - UI anchors and margins set
-   - Signals connected in scene
-
-3. **Scene Format**:
-   Use proper .tscn format:
-   ```
-   [gd_scene load_steps=2 format=3 uid="uid://..."]
-   
-   [ext_resource type="Script" path="res://scripts/player/player.gd" id="1"]
-   
-   [node name="Player" type="CharacterBody2D"]
-   script = ExtResource("1")
-   
-   [node name="Sprite2D" type="Sprite2D" parent="."]
-   position = Vector2(0, 0)
-   
-   [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
-   ```
-   
-4. **Main Scene Setup**:
-   - Create scenes/main.tscn as the main game scene
-   - Include all game elements
-   - Set up proper scene tree
-   - Make it runnable immediately
+# File: scripts/player/player.gd
+extends CharacterBody2D
+@export var speed: float = 300.0
+...
 
 User Request: """ + user_prompt
 
 	if include_codebase:
-		# Get project context with enhanced scanning
-		# Call static methods directly on the class name (class_name registration makes it available globally)
 		if _codebase_scanner_script != null:
-			var project_summary = ""
-			var relevant_files = []
+			var project_summary = CodebaseScanner.get_project_summary("res://")
+			var relevant_files = CodebaseScanner.get_relevant_files(user_prompt, "res://", 12)
 			
-			# Try to call static methods on the class name
-			# The class should be available once the script is loaded
-			# Use a try-catch approach since ClassDB doesn't work for GDScript classes
-			var error_occurred = false
-			if not error_occurred:
-				# Try calling directly - if class_name is registered, this will work
-				project_summary = CodebaseScanner.get_project_summary("res://")
-				relevant_files = CodebaseScanner.get_relevant_files(user_prompt, "res://", 12)
-			
-			var context_prompt = """
-
-═══════════════════════════════════════════════════════════════
-PROJECT CONTEXT - FULL CODEBASE AWARENESS
-═══════════════════════════════════════════════════════════════
-
-""" + project_summary
+			var context_prompt = "\n\nProject Context:\n" + project_summary
 			
 			if relevant_files.size() > 0:
-				context_prompt += "\n\n═══════════════════════════════════════════════════════════════\n"
-				context_prompt += "RELEVANT FILES (with dependencies and relationships):\n"
-				context_prompt += "═══════════════════════════════════════════════════════════════\n\n"
-				
+				context_prompt += "\n\nRelevant Files:\n"
 				for i in range(relevant_files.size()):
 					var file_data = relevant_files[i]
-					var file_header = "[" + str(i + 1) + "] File: " + file_data.path
+					var file_header = "[" + str(i + 1) + "] " + file_data.path
 					
-					# Add metadata if available
 					if file_data.has("class_name") and file_data.class_name != "":
 						file_header += " (class: " + file_data.class_name + ")"
 					if file_data.has("extends") and file_data.extends != "":
 						file_header += " extends " + file_data.extends
-					if file_data.has("relation"):
-						file_header += " [" + file_data.relation + "]"
 					
 					context_prompt += file_header + "\n"
-					context_prompt += "-" * 60 + "\n"
 					
-					# Include full content for smaller files, truncated for larger ones
 					var content = file_data.content
 					var max_length = 3000
 					if content.length() > max_length:
-						# Try to keep important parts (class definition, key functions)
 						var first_part = content.substr(0, max_length / 2)
 						var last_part = content.substr(content.length() - max_length / 2)
-						content = first_part + "\n\n... [middle section truncated for brevity] ...\n\n" + last_part
+						content = first_part + "\n\n... [truncated] ...\n\n" + last_part
 					
 					context_prompt += "```gdscript\n" + content + "\n```\n\n"
 			
-			context_prompt += """
-═══════════════════════════════════════════════════════════════
-INSTRUCTIONS FOR CODE GENERATION:
-═══════════════════════════════════════════════════════════════
-
-1. ANALYZE the existing code patterns, naming conventions, and architecture
-2. MAINTAIN consistency with the project's coding style
-3. REFERENCE existing classes and functions when appropriate
-4. FOLLOW the project's file organization structure
-5. CONSIDER dependencies - if modifying a file, check what depends on it
-6. CREATE complete, production-ready code that integrates seamlessly
-
-When creating or modifying files:
-- Use the exact same style as existing files
-- Match indentation and formatting
-- Follow the same patterns for signals, exports, and function organization
-- If extending a class, ensure compatibility with existing code
-- Add appropriate comments matching the project's comment style
-
-"""
+			context_prompt += "\nWhen generating code:\n"
+			context_prompt += "- Match existing code style and patterns\n"
+			context_prompt += "- Follow the project's file organization\n"
+			context_prompt += "- Consider dependencies when modifying files\n"
+			context_prompt += "- Maintain consistency with existing architecture\n"
 			
 			system_prompt += context_prompt
-		else:
-			# Codebase scanning not available, but continue without it
-			pass
 	
-	system_prompt += """
-
-═══════════════════════════════════════════════════════════════
-📝 OUTPUT FORMAT REQUIREMENTS (ABSOLUTELY CRITICAL):
-═══════════════════════════════════════════════════════════════
-
-🚨 YOU MUST CREATE COMPLETE GAMES, NOT CODE SNIPPETS! 🚨
-
-FORMAT STRUCTURE (MANDATORY):
-
-# File: scenes/main.tscn
-[COMPLETE scene file with all nodes, scripts, and connections]
-
-# File: scripts/player/player.gd
-[COMPLETE script - fully functional, no placeholders]
-
-# File: scripts/enemies/enemy.gd
-[COMPLETE script - fully functional]
-
-# File: scripts/managers/game_manager.gd
-[COMPLETE script - fully functional]
-
-... (ALL files needed for a complete, playable game)
-
-🎯 CRITICAL RULES:
-
-1. **ALWAYS USE FILE MARKERS**: Every file MUST start with "# File: path/to/file.ext"
-   - Without file markers, files CANNOT be created automatically
-   - Paths are relative to res:// (e.g., "scripts/player.gd" NOT "res://scripts/player.gd")
-
-2. **CREATE ALL FILES IN ONE RESPONSE**:
-   - Main scene (.tscn)
-   - All scripts (.gd)
-   - Resources (.tres) if needed
-   - UI scenes if needed
-   - Configuration files if needed
-   - DO NOT split across multiple responses
-
-3. **COMPLETE CODE ONLY**:
-   - NO placeholders like "// TODO" or "// Add code here"
-   - NO incomplete functions
-   - NO missing implementations
-   - EVERYTHING must be fully functional
-
-4. **PROPER PROJECT STRUCTURE**:
-   - scripts/player/ - Player scripts
-   - scripts/enemies/ - Enemy scripts
-   - scripts/ui/ - UI scripts
-   - scripts/managers/ - Game managers
-   - scenes/ - All scene files
-   - resources/ - Resources if needed
-
-5. **SCENE FILES MUST BE COMPLETE**:
-   - Proper .tscn format
-   - All nodes defined
-   - Scripts attached
-   - Properties configured
-   - Scene is ready to run
-
-6. **SCRIPTS MUST BE COMPLETE**:
-   - All functions implemented
-   - Type hints included
-   - Error handling added
-   - Signals declared and used
-   - Ready to use immediately
-
-CRITICAL RULES FOR PRODUCTION-READY CODE:
-1. Each file marker MUST be on its own line: "# File: path/to/file.gd"
-2. Paths are relative to res:// (e.g., "scripts/player.gd" NOT "res://scripts/player.gd")
-3. Include COMPLETE, PRODUCTION-READY code - fully functional, optimized, documented
-4. If the request requires multiple files, create ALL of them in the same response
-5. If modifying existing files, show the COMPLETE modified file content
-6. Maintain consistency with existing project patterns, style, and architecture
-7. Use advanced GDScript: type hints, proper error handling, performance optimizations
-8. Create professional directory structure: "scripts/", "scenes/", "resources/", "autoloads/"
-9. Ensure all files work together seamlessly - verify dependencies, imports, references
-10. NO explanations between files - just file markers and code (explanations go before code blocks)
-11. Code will be automatically saved - make it production-ready with best practices
-12. Use design patterns where appropriate: State Machines, Singletons, Managers, Components
-13. Include comprehensive error handling: null checks, validation, graceful failures
-14. Optimize for performance: cache nodes, use appropriate process functions, avoid redundant calculations
-15. Add meaningful comments: explain WHY (architecture decisions), not just WHAT (code does)
-16. Use proper Godot conventions: snake_case, signal declarations, @export for editor properties
-
-📚 COMPLETE GAME EXAMPLE:
-
-User: "Create a 2D side scroller"
-
-You MUST create ALL of these files:
-
-# File: scenes/main.tscn
-[gd_scene load_steps=4 format=3 uid="uid://main_scene"]
-
-[ext_resource type="PackedScene" path="res://scenes/player.tscn" id="1"]
-[ext_resource type="PackedScene" path="res://scenes/enemy.tscn" id="2"]
-[ext_resource type="Script" path="res://scripts/managers/game_manager.gd" id="3"]
-
-[node name="Main" type="Node2D"]
-script = ExtResource("3")
-
-[node name="Player" parent="." instance=ExtResource("1")]
-position = Vector2(100, 300)
-
-[node name="Enemy" parent="." instance=ExtResource("2")]
-position = Vector2(500, 300)
-
-[node name="Camera2D" type="Camera2D" parent="Player"]
-enabled = true
-
-[node name="UI" type="Control" parent="."]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-
-[node name="ScoreLabel" type="Label" parent="UI"]
-layout_mode = 1
-anchors_preset = 2
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_left = 20.0
-offset_top = -40.0
-offset_right = 200.0
-offset_bottom = -10.0
-text = "Score: 0"
-
-# File: scripts/player/player.gd
-extends CharacterBody2D
-
-@export var speed: float = 300.0
-@export var jump_velocity: float = -400.0
-
-var gravity: float = ProjectSettings.get_setting("physics/2d/default_gravity")
-
-func _physics_process(delta: float) -> void:
-	# Apply gravity
-	if not is_on_floor():
-		velocity.y += gravity * delta
-	
-	# Handle jump
-	if Input.is_action_just_pressed("ui_accept") and is_on_floor():
-		velocity.y = jump_velocity
-	
-	# Handle horizontal movement
-	var direction = Input.get_axis("ui_left", "ui_right")
-	if direction:
-		velocity.x = direction * speed
-	else:
-		velocity.x = move_toward(velocity.x, 0, speed)
-	
-	move_and_slide()
-
-# File: scenes/player.tscn
-[gd_scene load_steps=3 format=3 uid="uid://player"]
-
-[ext_resource type="Script" path="res://scripts/player/player.gd" id="1"]
-
-[sub_resource type="RectangleShape2D" id="1"]
-size = Vector2(32, 48)
-
-[node name="Player" type="CharacterBody2D"]
-script = ExtResource("1")
-
-[node name="Sprite2D" type="Sprite2D" parent="."]
-
-[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
-shape = SubResource("1")
-
-# File: scripts/enemies/enemy.gd
-extends CharacterBody2D
-
-@export var speed: float = 100.0
-@export var health: int = 100
-
-var direction: int = -1
-
-func _physics_process(delta: float) -> void:
-	velocity.x = direction * speed
-	
-	# Simple collision detection
-	if is_on_wall():
-		direction *= -1
-	
-	move_and_slide()
-
-func take_damage(amount: int) -> void:
-	health -= amount
-	if health <= 0:
-		queue_free()
-
-# File: scenes/enemy.tscn
-[gd_scene load_steps=3 format=3 uid="uid://enemy"]
-
-[ext_resource type="Script" path="res://scripts/enemies/enemy.gd" id="1"]
-
-[sub_resource type="RectangleShape2D" id="1"]
-size = Vector2(32, 32)
-
-[node name="Enemy" type="CharacterBody2D"]
-script = ExtResource("1")
-
-[node name="Sprite2D" type="Sprite2D" parent="."]
-
-[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
-shape = SubResource("1")
-
-# File: scripts/managers/game_manager.gd
-extends Node2D
-
-@onready var score_label: Label = $UI/ScoreLabel
-
-var score: int = 0
-
-func _ready() -> void:
-	update_score_display()
-
-func add_score(points: int) -> void:
-	score += points
-	update_score_display()
-
-func update_score_display() -> void:
-	if score_label:
-		score_label.text = "Score: " + str(score)
-
-🎯 REMEMBER: This is a COMPLETE, PLAYABLE GAME. The user can run it immediately!
-
-🚨 AI GAME ENGINE CRITICAL REMINDERS:
-- ALWAYS create scenes/main.tscn as the main scene
-- ALWAYS use file markers (# File: path/to/file.ext) for EVERY file
-- ALWAYS create complete, functional code - NO placeholders
-- ALWAYS make games playable immediately after generation
-- ALWAYS include all necessary systems (player, manager, UI, etc.)
-- ALWAYS generate production-ready code with proper error handling
-
-You are an AI GAME ENGINE. Generate COMPLETE GAMES, not code snippets!
-
-═══════════════════════════════════════════════════════════════"""
+	system_prompt += "\n\nOutput Format:\n"
+	system_prompt += "- Use file markers: # File: path/to/file.ext\n"
+	system_prompt += "- Create all files in one response\n"
+	system_prompt += "- No placeholders or incomplete code\n"
+	system_prompt += "- Paths relative to res://\n"
+	system_prompt += "- Complete, production-ready code only\n"
 
 	return system_prompt
 
@@ -848,10 +388,7 @@ func start_new_conversation() -> void:
 		conversation_manager.start_conversation()
 
 func _on_request_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray):
-	print("DotAI: HTTP request completed. Result: ", result, ", Response code: ", response_code)
-	
 	if result != HTTPRequest.RESULT_SUCCESS:
-		print("DotAI: HTTP request failed with result: ", result)
 		request_error.emit("HTTP request failed: " + str(result))
 		return
 	
@@ -860,7 +397,6 @@ func _on_request_completed(result: int, response_code: int, headers: PackedStrin
 		var body_text = body.get_string_from_utf8()
 		if body_text:
 			error_msg += "\n" + body_text
-		print("DotAI: API error response: ", body_text)
 		request_error.emit(error_msg)
 		return
 	
@@ -915,34 +451,16 @@ func _extract_code(text: String) -> String:
 	# If no code blocks found, return the whole text
 	return text.strip_edges()
 
-## Write files to codebase (called from C++ dock)
 func write_files_to_codebase(params: Dictionary) -> Dictionary:
 	var response_text: String = params.get("response_text", "")
 	
-	print("DotAI API Handler: write_files_to_codebase called")
-	print("DotAI API Handler: Response text length: ", response_text.length())
-	
 	if response_text.is_empty():
-		print("DotAI API Handler: ERROR - No response text provided")
 		return {"success": false, "error": "No response text provided"}
 	
 	if _file_writer_script == null:
-		print("DotAI API Handler: ERROR - file_writer.gd script not found")
-		return {"success": false, "error": "file_writer.gd script not found. Please ensure codebase_scanner.gd and file_writer.gd are in res://addons/claude_ai/"}
+		return {"success": false, "error": "file_writer.gd script not found"}
 	
-	print("DotAI API Handler: Calling FileWriter.parse_and_write_files...")
-	# Use FileWriter class directly (call static method on class name)
-	# The class should be available once the script is loaded
-	# Try calling directly - if class_name is registered, this will work
 	var result = FileWriter.parse_and_write_files(response_text, "res://")
-	
-	print("DotAI API Handler: FileWriter returned:")
-	print("  - Success: ", result.get("success", false))
-	print("  - Files written: ", result.get("files_written", []).size())
-	print("  - Files created: ", result.get("files_created", []).size())
-	print("  - Files failed: ", result.get("files_failed", []).size())
-	if result.has("error"):
-		print("  - Error: ", result.error)
 	
 	# Return comprehensive result
 	var return_dict = {
@@ -963,46 +481,27 @@ func write_files_to_codebase(params: Dictionary) -> Dictionary:
 	if Engine.is_editor_hint():
 		call_deferred("_refresh_file_system")
 	
-	# AI GAME ENGINE: Post-process files for complete game functionality
 	if result.success and result.files_created.size() > 0:
-		print("DotAI: Post-processing ", result.files_created.size(), " created files for game engine...")
-		
-		# Try to load game engine core
 		var game_engine_script = load("res://addons/claude_ai/game_engine_core.gd")
 		if game_engine_script == null:
 			game_engine_script = load("res://game_engine_core.gd")
 		
 		if game_engine_script:
-			var post_result = GameEngineCore.post_process_generated_files(result.files_created)
-			if post_result.main_scene_set:
-				print("DotAI: ✓ Main scene set successfully")
-			if post_result.input_map_created:
-				print("DotAI: ✓ Input map created successfully")
-			
-			# Verify game is playable
-			var verification = GameEngineCore.verify_game_playable()
-			if verification.playable:
-				print("DotAI: ✓ Game verified as playable!")
-			else:
-				print("DotAI: ⚠ Game verification issues: ", verification.issues)
+			GameEngineCore.post_process_generated_files(result.files_created)
 		else:
-			# Fallback: manually set main scene if found
 			for file_path in result.files_created:
 				if file_path.ends_with("main.tscn") or file_path.ends_with("main_scene.tscn"):
 					var project_settings = ProjectSettings.get_singleton()
 					if project_settings:
 						project_settings.set_setting("application/run/main_scene", "res://" + file_path)
 						project_settings.save()
-						print("DotAI: ✓ Main scene set to: res://" + file_path)
 					break
 	
 	return return_dict
 
 func _refresh_file_system():
 	if Engine.is_editor_hint():
-		print("DotAI API Handler: Refreshing editor file system...")
 		EditorFileSystem.get_singleton().scan_changes()
-		print("DotAI API Handler: File system refresh initiated")
 
 func _on_multi_model_complete(response_text: String):
 	request_complete.emit(response_text)
